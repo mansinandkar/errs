@@ -42,7 +42,9 @@ The database consists of dimension tables, transactional tables, and audit table
 
 All tables are connected using primary and foreign keys to ensure referential integrity.
 
-The Entity Relationship Diagram (ERD) is included in the `reports/` directory.
+---
+### Entity Relation Diagram
+<img width="1193" height="666" alt="ERRS ERD" src="https://github.com/user-attachments/assets/73186ee7-0b46-4322-914b-153293c2119a" />
 
 ---
 
