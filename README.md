@@ -59,15 +59,10 @@ The Entity Relationship Diagram (ERD) is included in the `reports/` directory.
 ## Implementation Details
 
 - Table Creation
-
 - Data Population
-
 - Views and Queries
-
 - Audit Table and Triggers
-
 - Stored Procedure and User-Defined Function
-
 - Cursor Implementation
 
 ---
@@ -76,9 +71,6 @@ The Entity Relationship Diagram (ERD) is included in the `reports/` directory.
 
 - Mansi Nandkar
 - Suraj Ravindra Rao
-
-
-- Documentation Standards
 
 
 
