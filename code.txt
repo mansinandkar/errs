@@ -1,0 +1,664 @@
+/*
+================================================================================
+Emergency Resource Reservation and Coordination System (ERRS)
+
+Description: Database system for managing emergency resources including
+ambulances, ICU beds, oxygen cylinders, and medical equipment across hospitals,
+NGOs, and emergency response teams.
+================================================================================
+*/
+
+-- ============================================================================
+-- DATABASE SETUP
+-- ============================================================================
+
+-- Switch to master database before dropping
+USE master;
+GO
+
+-- Drop database if it exists
+IF EXISTS (SELECT * FROM sys.databases WHERE name = 'Group32_ERRS')
+BEGIN
+    ALTER DATABASE Group32_ERRS SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE Group32_ERRS;
+END
+GO
+
+-- Create new database
+CREATE DATABASE Group32_ERRS;
+GO
+
+-- Switch to new database
+USE Group32_ERRS;
+GO
+
+PRINT 'Database created successfully';
+GO
+
+-- ============================================================================
+-- CREATE TABLES
+-- ============================================================================
+
+-- Table 1: Hospitals
+CREATE TABLE Hospitals (
+    HospitalID INT IDENTITY(1,1) PRIMARY KEY,
+    HospitalName VARCHAR(100) NOT NULL,
+    Address VARCHAR(200) NOT NULL,
+    City VARCHAR(50) NOT NULL,
+    State VARCHAR(2) NOT NULL,
+    ZipCode VARCHAR(10) NOT NULL,
+    PhoneNumber VARCHAR(15) NOT NULL,
+    EmergencyContact VARCHAR(15) NULL,
+    TotalBeds INT NULL CHECK (TotalBeds >= 0),
+    IsActive BIT NOT NULL DEFAULT 1
+);
+GO
+
+-- Table 2: Organizations
+CREATE TABLE Organizations (
+    OrganizationID INT IDENTITY(1,1) PRIMARY KEY,
+    OrganizationName VARCHAR(100) NOT NULL,
+    OrganizationType VARCHAR(50) NOT NULL,
+    ContactPerson VARCHAR(100) NULL,
+    PhoneNumber VARCHAR(15) NOT NULL,
+    Email VARCHAR(100) NULL,
+    Address VARCHAR(200) NOT NULL,
+    IsActive BIT NOT NULL DEFAULT 1
+);
+GO
+
+-- Table 3: ResourceTypes
+CREATE TABLE ResourceTypes (
+    ResourceTypeID INT IDENTITY(1,1) PRIMARY KEY,
+    TypeName VARCHAR(50) NOT NULL UNIQUE,
+    Description VARCHAR(200) NULL,
+    Category VARCHAR(50) NOT NULL,
+    RequiresOperator BIT NOT NULL DEFAULT 0,
+    IsActive BIT NOT NULL DEFAULT 1
+);
+GO
+
+-- Table 4: Locations
+CREATE TABLE Locations (
+    LocationID INT IDENTITY(1,1) PRIMARY KEY,
+    LocationName VARCHAR(100) NOT NULL,
+    Latitude DECIMAL(9,6) NULL,
+    Longitude DECIMAL(9,6) NULL,
+    City VARCHAR(50) NOT NULL,
+    ZipCode VARCHAR(10) NULL,
+    Description VARCHAR(200) NULL
+);
+GO
+
+-- Table 5: Staff
+CREATE TABLE Staff (
+    StaffID INT IDENTITY(1,1) PRIMARY KEY,
+    FirstName VARCHAR(50) NOT NULL,
+    LastName VARCHAR(50) NOT NULL,
+    Email VARCHAR(100) NOT NULL UNIQUE,
+    PhoneNumber VARCHAR(15) NULL,
+    Role VARCHAR(50) NOT NULL,
+    HospitalID INT NULL,
+    OrganizationID INT NULL,
+    IsActive BIT NOT NULL DEFAULT 1,
+    CreatedDate DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_Staff_Hospital FOREIGN KEY (HospitalID) REFERENCES Hospitals(HospitalID),
+    CONSTRAINT FK_Staff_Organization FOREIGN KEY (OrganizationID) REFERENCES Organizations(OrganizationID)
+);
+GO
+
+-- Table 6: Resources (Transactional)
+CREATE TABLE Resources (
+    ResourceID INT IDENTITY(1,1) PRIMARY KEY,
+    ResourceTypeID INT NOT NULL,
+    ResourceName VARCHAR(100) NOT NULL,
+    SerialNumber VARCHAR(50) NULL UNIQUE,
+    HospitalID INT NULL,
+    OrganizationID INT NULL,
+    LocationID INT NOT NULL,
+    Status VARCHAR(20) NOT NULL DEFAULT 'Available',
+    Condition VARCHAR(20) NOT NULL DEFAULT 'Good',
+    LastMaintenanceDate DATE NULL,
+    PurchaseDate DATE NULL,
+    IsActive BIT NOT NULL DEFAULT 1,
+    CONSTRAINT FK_Resources_ResourceType FOREIGN KEY (ResourceTypeID) REFERENCES ResourceTypes(ResourceTypeID),
+    CONSTRAINT FK_Resources_Hospital FOREIGN KEY (HospitalID) REFERENCES Hospitals(HospitalID),
+    CONSTRAINT FK_Resources_Organization FOREIGN KEY (OrganizationID) REFERENCES Organizations(OrganizationID),
+    CONSTRAINT FK_Resources_Location FOREIGN KEY (LocationID) REFERENCES Locations(LocationID),
+    CONSTRAINT CHK_Resources_Status CHECK (Status IN ('Available', 'In Use', 'Maintenance', 'Out of Service')),
+    CONSTRAINT CHK_Resources_Condition CHECK (Condition IN ('Good', 'Fair', 'Poor'))
+);
+GO
+
+-- Table 7: Reservations (Transactional)
+CREATE TABLE Reservations (
+    ReservationID INT IDENTITY(1,1) PRIMARY KEY,
+    ResourceID INT NOT NULL,
+    RequestedBy INT NOT NULL,
+    PatientName VARCHAR(100) NULL,
+    EmergencyType VARCHAR(50) NOT NULL,
+    PriorityLevel INT NOT NULL CHECK (PriorityLevel BETWEEN 1 AND 5),
+    ReservationDateTime DATETIME NOT NULL DEFAULT GETDATE(),
+    StartDateTime DATETIME NOT NULL,
+    EndDateTime DATETIME NULL,
+    PickupLocationID INT NULL,
+    DropoffLocationID INT NULL,
+    Status VARCHAR(20) NOT NULL DEFAULT 'Active',
+    Notes VARCHAR(500) NULL,
+    CONSTRAINT FK_Reservations_Resource FOREIGN KEY (ResourceID) REFERENCES Resources(ResourceID),
+    CONSTRAINT FK_Reservations_Staff FOREIGN KEY (RequestedBy) REFERENCES Staff(StaffID),
+    CONSTRAINT FK_Reservations_PickupLocation FOREIGN KEY (PickupLocationID) REFERENCES Locations(LocationID),
+    CONSTRAINT FK_Reservations_DropoffLocation FOREIGN KEY (DropoffLocationID) REFERENCES Locations(LocationID),
+    CONSTRAINT CHK_Reservations_Status CHECK (Status IN ('Active', 'Completed', 'Cancelled'))
+);
+GO
+
+-- Table 8: ResourceAudit (Audit Table)
+CREATE TABLE ResourceAudit (
+    AuditID INT IDENTITY(1,1) PRIMARY KEY,
+    ResourceTypeID INT NOT NULL,
+    TypeName VARCHAR(50) NOT NULL,
+    Description VARCHAR(200) NULL,
+    Category VARCHAR(50) NOT NULL,
+    Operation VARCHAR(10) NOT NULL,
+    ModifiedBy VARCHAR(100) NULL,
+    ModifiedDate DATETIME NOT NULL DEFAULT GETDATE()
+);
+GO
+
+-- ============================================================================
+-- POPULATE TABLES
+-- ============================================================================
+
+-- Hospitals (10 rows)
+INSERT INTO Hospitals (HospitalName, Address, City, State, ZipCode, PhoneNumber, EmergencyContact, TotalBeds, IsActive)
+VALUES 
+('Phoenix General Hospital', '1234 Main St', 'Phoenix', 'AZ', '85001', '602-555-0001', '602-555-0101', 250, 1),
+('Tempe Medical Center', '5678 University Dr', 'Tempe', 'AZ', '85281', '480-555-0002', '480-555-0102', 180, 1),
+('Scottsdale Memorial Hospital', '9101 E Shea Blvd', 'Scottsdale', 'AZ', '85260', '480-555-0003', '480-555-0103', 320, 1),
+('Mesa Regional Medical', '2345 S Dobson Rd', 'Mesa', 'AZ', '85202', '480-555-0004', '480-555-0104', 200, 1),
+('Chandler Community Hospital', '3456 W Chandler Blvd', 'Chandler', 'AZ', '85226', '480-555-0005', '480-555-0105', 150, 1),
+('Gilbert Healthcare Center', '4567 E Baseline Rd', 'Gilbert', 'AZ', '85234', '480-555-0006', '480-555-0106', 175, 1),
+('Glendale Memorial Hospital', '5678 W Glendale Ave', 'Glendale', 'AZ', '85301', '623-555-0007', '623-555-0107', 220, 1),
+('Peoria Health Center', '6789 N 83rd Ave', 'Peoria', 'AZ', '85345', '623-555-0008', '623-555-0108', 160, 1),
+('Surprise Medical Center', '7890 W Bell Rd', 'Surprise', 'AZ', '85374', '623-555-0009', '623-555-0109', 140, 1),
+('Tucson General Hospital', '8901 E Broadway', 'Tucson', 'AZ', '85710', '520-555-0010', '520-555-0110', 280, 1);
+GO
+
+-- Organizations (10 rows)
+INSERT INTO Organizations (OrganizationName, OrganizationType, ContactPerson, PhoneNumber, Email, Address, IsActive)
+VALUES 
+('Arizona Red Cross', 'NGO', 'John Smith', '602-555-1001', 'contact@azredcross.org', '1000 N Central Ave, Phoenix, AZ 85004', 1),
+('Phoenix Fire Department', 'Fire Department', 'Sarah Johnson', '602-555-1002', 'info@phoenixfire.gov', '150 S 12th St, Phoenix, AZ 85034', 1),
+('Southwest Ambulance Services', 'Private EMS', 'Michael Brown', '480-555-1003', 'dispatch@swambulance.com', '2500 E University Dr, Tempe, AZ 85281', 1),
+('Arizona Emergency Response Team', 'Emergency Response', 'Emily Davis', '602-555-1004', 'info@azert.org', '3000 N 24th St, Phoenix, AZ 85016', 1),
+('Valley Metro EMS', 'Public EMS', 'Robert Wilson', '480-555-1005', 'ems@valleymetro.org', '101 N 1st Ave, Phoenix, AZ 85003', 1),
+('Disaster Relief Arizona', 'NGO', 'Jennifer Martinez', '602-555-1006', 'help@disasterreliefaz.org', '4500 E Van Buren St, Phoenix, AZ 85008', 1),
+('Maricopa Emergency Services', 'County Agency', 'David Anderson', '602-555-1007', 'emergency@maricopa.gov', '301 W Jefferson St, Phoenix, AZ 85003', 1),
+('Life Link Air Ambulance', 'Air Ambulance', 'Lisa Thompson', '480-555-1008', 'dispatch@lifelink.com', '5000 E Sky Harbor Blvd, Phoenix, AZ 85034', 1),
+('Community Health Response', 'NGO', 'James Garcia', '602-555-1009', 'info@chr.org', '6000 N 7th St, Phoenix, AZ 85014', 1),
+('Arizona Medical Transport', 'Medical Transport', 'Patricia Rodriguez', '480-555-1010', 'service@azmedtrans.com', '7000 E McDowell Rd, Scottsdale, AZ 85257', 1);
+GO
+
+-- ResourceTypes (10 rows)
+INSERT INTO ResourceTypes (TypeName, Description, Category, RequiresOperator, IsActive)
+VALUES 
+('Ambulance', 'Emergency medical transport vehicle', 'Vehicle', 1, 1),
+('ICU Bed', 'Intensive Care Unit bed with monitoring equipment', 'Bed', 0, 1),
+('Oxygen Cylinder', 'Portable oxygen supply', 'Equipment', 0, 1),
+('Ventilator', 'Mechanical breathing assistance device', 'Equipment', 1, 1),
+('Defibrillator', 'Emergency cardiac response equipment', 'Equipment', 1, 1),
+('Wheelchair', 'Patient mobility assistance', 'Equipment', 0, 1),
+('Stretcher', 'Patient transport bed', 'Equipment', 0, 1),
+('Emergency Room Bed', 'Standard emergency department bed', 'Bed', 0, 1),
+('Mobile X-Ray Unit', 'Portable diagnostic imaging equipment', 'Equipment', 1, 1),
+('Medical Helicopter', 'Air ambulance for critical transport', 'Vehicle', 1, 1);
+GO
+
+-- Locations (10 rows)
+INSERT INTO Locations (LocationName, Latitude, Longitude, City, ZipCode, Description)
+VALUES 
+('Downtown Phoenix', 33.448376, -112.074036, 'Phoenix', '85004', 'Central business district'),
+('Tempe Campus Area', 33.425510, -111.940005, 'Tempe', '85281', 'ASU area and surrounding'),
+('North Scottsdale', 33.620370, -111.876534, 'Scottsdale', '85260', 'North Scottsdale region'),
+('East Mesa', 33.422062, -111.583009, 'Mesa', '85202', 'Eastern Mesa area'),
+('West Chandler', 33.306160, -111.941288, 'Chandler', '85226', 'West Chandler district'),
+('Gilbert Downtown', 33.352933, -111.789023, 'Gilbert', '85234', 'Gilbert town center'),
+('West Glendale', 33.538651, -112.186438, 'Glendale', '85301', 'West Valley area'),
+('Peoria Sports Complex', 33.631294, -112.241866, 'Peoria', '85345', 'North Peoria region'),
+('Surprise Stadium Area', 33.630210, -112.365158, 'Surprise', '85374', 'Northwest Valley'),
+('Central Tucson', 32.221743, -110.926479, 'Tucson', '85710', 'Tucson metropolitan area');
+GO
+
+-- Staff (10 rows)
+INSERT INTO Staff (FirstName, LastName, Email, PhoneNumber, Role, HospitalID, OrganizationID, IsActive)
+VALUES 
+('Alice', 'Johnson', 'alice.johnson@phoenixgeneral.com', '602-555-2001', 'Administrator', 1, NULL, 1),
+('Bob', 'Williams', 'bob.williams@tempemedical.com', '480-555-2002', 'Coordinator', 2, NULL, 1),
+('Carol', 'Martinez', 'carol.martinez@scottsdalehealth.com', '480-555-2003', 'Coordinator', 3, NULL, 1),
+('David', 'Brown', 'david.brown@azredcross.org', '602-555-2004', 'Coordinator', NULL, 1, 1),
+('Emma', 'Davis', 'emma.davis@phoenixfire.gov', '602-555-2005', 'Administrator', NULL, 2, 1),
+('Frank', 'Miller', 'frank.miller@swambulance.com', '480-555-2006', 'Coordinator', NULL, 3, 1),
+('Grace', 'Wilson', 'grace.wilson@mesaregional.com', '480-555-2007', 'Viewer', 4, NULL, 1),
+('Henry', 'Moore', 'henry.moore@chandlerhospital.com', '480-555-2008', 'Coordinator', 5, NULL, 1),
+('Iris', 'Taylor', 'iris.taylor@azert.org', '602-555-2009', 'Administrator', NULL, 4, 1),
+('Jack', 'Anderson', 'jack.anderson@gilberthealth.com', '480-555-2010', 'Viewer', 6, NULL, 1);
+GO
+
+-- Resources (30 rows)
+INSERT INTO Resources (ResourceTypeID, ResourceName, SerialNumber, HospitalID, OrganizationID, LocationID, Status, Condition, LastMaintenanceDate, PurchaseDate, IsActive)
+VALUES 
+(1, 'Ambulance-PH-001', 'AMB001', 1, NULL, 1, 'Available', 'Good', '2025-10-15', '2023-01-10', 1),
+(1, 'Ambulance-PH-002', 'AMB002', 1, NULL, 1, 'In Use', 'Good', '2025-10-20', '2023-02-15', 1),
+(1, 'Ambulance-TM-001', 'AMB003', 2, NULL, 2, 'Available', 'Good', '2025-11-01', '2023-03-20', 1),
+(1, 'Ambulance-SC-001', 'AMB004', 3, NULL, 3, 'Maintenance', 'Fair', '2025-09-10', '2022-12-05', 1),
+(1, 'Ambulance-SW-001', 'AMB005', NULL, 3, 2, 'Available', 'Good', '2025-11-05', '2024-01-15', 1),
+(2, 'ICU-Bed-PH-101', 'ICU101', 1, NULL, 1, 'Available', 'Good', NULL, '2023-01-01', 1),
+(2, 'ICU-Bed-PH-102', 'ICU102', 1, NULL, 1, 'In Use', 'Good', NULL, '2023-01-01', 1),
+(2, 'ICU-Bed-PH-103', 'ICU103', 1, NULL, 1, 'In Use', 'Good', NULL, '2023-01-01', 1),
+(2, 'ICU-Bed-TM-101', 'ICU104', 2, NULL, 2, 'Available', 'Good', NULL, '2023-02-01', 1),
+(2, 'ICU-Bed-TM-102', 'ICU105', 2, NULL, 2, 'In Use', 'Fair', NULL, '2023-02-01', 1),
+(2, 'ICU-Bed-SC-101', 'ICU106', 3, NULL, 3, 'Available', 'Good', NULL, '2023-03-01', 1),
+(2, 'ICU-Bed-MS-101', 'ICU107', 4, NULL, 4, 'Available', 'Good', NULL, '2023-04-01', 1),
+(3, 'Oxygen-PH-001', 'OXY001', 1, NULL, 1, 'Available', 'Good', '2025-10-01', '2024-01-01', 1),
+(3, 'Oxygen-PH-002', 'OXY002', 1, NULL, 1, 'Available', 'Good', '2025-10-01', '2024-01-01', 1),
+(3, 'Oxygen-TM-001', 'OXY003', 2, NULL, 2, 'In Use', 'Good', '2025-10-15', '2024-02-01', 1),
+(3, 'Oxygen-SC-001', 'OXY004', 3, NULL, 3, 'Available', 'Good', '2025-11-01', '2024-03-01', 1),
+(4, 'Ventilator-PH-001', 'VENT001', 1, NULL, 1, 'Available', 'Good', '2025-09-15', '2023-06-01', 1),
+(4, 'Ventilator-PH-002', 'VENT002', 1, NULL, 1, 'In Use', 'Good', '2025-09-20', '2023-06-01', 1),
+(4, 'Ventilator-TM-001', 'VENT003', 2, NULL, 2, 'Available', 'Good', '2025-10-01', '2023-07-01', 1),
+(4, 'Ventilator-SC-001', 'VENT004', 3, NULL, 3, 'Available', 'Good', '2025-10-10', '2023-08-01', 1),
+(5, 'Defibrillator-PH-001', 'DEFIB001', 1, NULL, 1, 'Available', 'Good', '2025-08-01', '2024-01-01', 1),
+(5, 'Defibrillator-TM-001', 'DEFIB002', 2, NULL, 2, 'Available', 'Good', '2025-08-15', '2024-02-01', 1),
+(6, 'Wheelchair-PH-001', 'CHAIR001', 1, NULL, 1, 'Available', 'Good', NULL, '2022-01-01', 1),
+(6, 'Wheelchair-PH-002', 'CHAIR002', 1, NULL, 1, 'Available', 'Fair', NULL, '2022-01-01', 1),
+(6, 'Wheelchair-TM-001', 'CHAIR003', 2, NULL, 2, 'Available', 'Good', NULL, '2022-02-01', 1),
+(7, 'Stretcher-PH-001', 'STRCH001', 1, NULL, 1, 'Available', 'Good', NULL, '2023-01-01', 1),
+(7, 'Stretcher-TM-001', 'STRCH002', 2, NULL, 2, 'In Use', 'Good', NULL, '2023-02-01', 1),
+(8, 'ER-Bed-PH-201', 'ER201', 1, NULL, 1, 'Available', 'Good', NULL, '2023-01-01', 1),
+(8, 'ER-Bed-PH-202', 'ER202', 1, NULL, 1, 'In Use', 'Good', NULL, '2023-01-01', 1),
+(8, 'ER-Bed-TM-201', 'ER203', 2, NULL, 2, 'Available', 'Good', NULL, '2023-02-01', 1);
+GO
+
+-- Reservations (25 rows)
+INSERT INTO Reservations (ResourceID, RequestedBy, PatientName, EmergencyType, PriorityLevel, ReservationDateTime, StartDateTime, EndDateTime, PickupLocationID, DropoffLocationID, Status, Notes)
+VALUES 
+(2, 3, 'John Doe', 'Cardiac Emergency', 1, '2025-11-18 08:30:00', '2025-11-18 08:45:00', '2025-11-18 10:30:00', 1, 1, 'Completed', 'Patient stable after transport'),
+(4, 4, 'Jane Smith', 'Trauma', 2, '2025-11-18 09:15:00', '2025-11-18 09:30:00', NULL, 3, 3, 'Active', 'Vehicle under maintenance, reassigned'),
+(15, 2, 'Robert Johnson', 'Respiratory Distress', 1, '2025-11-18 10:00:00', '2025-11-18 10:15:00', NULL, 2, 2, 'Active', 'Patient on oxygen support'),
+(7, 1, 'Mary Williams', 'Post-Surgery', 3, '2025-11-17 14:00:00', '2025-11-17 14:30:00', NULL, 1, 1, 'Active', 'Extended ICU stay required'),
+(8, 3, 'James Brown', 'Heart Attack', 1, '2025-11-17 16:45:00', '2025-11-17 17:00:00', NULL, 1, 1, 'Active', 'Critical condition'),
+(10, 2, 'Patricia Davis', 'Stroke', 1, '2025-11-16 20:30:00', '2025-11-16 21:00:00', '2025-11-17 08:00:00', 2, 2, 'Completed', 'Patient recovered'),
+(18, 5, 'Michael Wilson', 'Pneumonia', 2, '2025-11-16 11:00:00', '2025-11-16 11:30:00', NULL, 1, 1, 'Active', 'Requires ventilator support'),
+(27, 3, 'Linda Martinez', 'Fall Injury', 3, '2025-11-15 09:00:00', '2025-11-15 09:20:00', '2025-11-15 12:00:00', 2, 2, 'Completed', 'Minor fracture treated'),
+(29, 2, 'David Anderson', 'Chest Pain', 2, '2025-11-15 13:30:00', '2025-11-15 14:00:00', NULL, 1, 1, 'Active', 'Under observation'),
+(1, 4, 'Sarah Taylor', 'Motor Vehicle Accident', 1, '2025-11-14 07:15:00', '2025-11-14 07:30:00', '2025-11-14 09:00:00', 1, 3, 'Completed', 'Multiple injuries, transported to trauma center'),
+(3, 6, 'Thomas Moore', 'Allergic Reaction', 2, '2025-11-14 15:20:00', '2025-11-14 15:35:00', '2025-11-14 16:30:00', 2, 2, 'Completed', 'Stabilized with epinephrine'),
+(5, 4, 'Jennifer Jackson', 'Diabetic Emergency', 2, '2025-11-13 10:45:00', '2025-11-13 11:00:00', '2025-11-13 12:30:00', 2, 1, 'Completed', 'Blood sugar normalized'),
+(1, 3, 'Christopher White', 'Burns', 1, '2025-11-13 18:00:00', '2025-11-13 18:15:00', '2025-11-13 19:45:00', 3, 1, 'Completed', 'Second-degree burns treated'),
+(2, 8, 'Nancy Harris', 'Seizure', 1, '2025-11-12 22:30:00', '2025-11-12 22:45:00', '2025-11-13 01:00:00', 4, 4, 'Completed', 'Seizure controlled'),
+(3, 4, 'Daniel Martin', 'Abdominal Pain', 3, '2025-11-12 14:00:00', '2025-11-12 14:20:00', '2025-11-12 16:00:00', 5, 4, 'Completed', 'Appendicitis diagnosed'),
+(5, 6, 'Karen Thompson', 'Broken Leg', 2, '2025-11-11 16:30:00', '2025-11-11 16:50:00', '2025-11-11 18:30:00', 6, 4, 'Completed', 'Fracture set and casted'),
+(1, 4, 'Paul Garcia', 'Chest Trauma', 1, '2025-11-11 08:00:00', '2025-11-11 08:15:00', '2025-11-11 10:00:00', 7, 1, 'Completed', 'Internal injuries assessed'),
+(3, 3, 'Lisa Rodriguez', 'Asthma Attack', 2, '2025-11-10 19:15:00', '2025-11-10 19:30:00', '2025-11-10 21:00:00', 8, 2, 'Completed', 'Breathing stabilized'),
+(2, 2, 'Mark Lee', 'Drug Overdose', 1, '2025-11-10 03:00:00', '2025-11-10 03:15:00', '2025-11-10 06:00:00', 1, 1, 'Completed', 'Narcan administered'),
+(5, 4, 'Betty Walker', 'Heat Stroke', 2, '2025-11-09 14:30:00', '2025-11-09 14:50:00', '2025-11-09 16:30:00', 9, 1, 'Completed', 'Cooled and hydrated'),
+(1, 6, 'Kevin Hall', 'Gunshot Wound', 1, '2025-11-09 23:45:00', '2025-11-09 23:55:00', '2025-11-10 02:30:00', 1, 1, 'Completed', 'Emergency surgery performed'),
+(3, 4, 'Donna Allen', 'Pregnancy Complications', 1, '2025-11-08 12:00:00', '2025-11-08 12:15:00', '2025-11-08 14:00:00', 2, 3, 'Completed', 'Mother and baby stable'),
+(2, 3, 'George Young', 'Food Poisoning', 3, '2025-11-08 06:30:00', '2025-11-08 07:00:00', '2025-11-08 10:00:00', 4, 4, 'Completed', 'IV fluids administered'),
+(5, 8, 'Sandra King', 'Spinal Injury', 1, '2025-11-07 17:20:00', '2025-11-07 17:35:00', '2025-11-07 20:00:00', 3, 1, 'Completed', 'Immobilized during transport'),
+(1, 4, 'Edward Wright', 'Hypothermia', 2, '2025-11-07 02:00:00', '2025-11-07 02:20:00', '2025-11-07 04:30:00', 10, 1, 'Completed', 'Gradual rewarming protocol');
+GO
+
+-- ============================================================================
+-- QUERIES AND VIEWS
+-- ============================================================================
+
+-- Query 1: Available Resources by Location
+-- Shows available resources grouped by location to help coordinators identify nearby resources
+SELECT 
+    l.LocationName,
+    l.City,
+    rt.TypeName AS ResourceType,
+    r.ResourceName,
+    r.Condition,
+    COALESCE(h.HospitalName, o.OrganizationName) AS Owner
+FROM Resources r
+INNER JOIN ResourceTypes rt ON r.ResourceTypeID = rt.ResourceTypeID
+INNER JOIN Locations l ON r.LocationID = l.LocationID
+LEFT JOIN Hospitals h ON r.HospitalID = h.HospitalID
+LEFT JOIN Organizations o ON r.OrganizationID = o.OrganizationID
+WHERE r.Status = 'Available' AND r.IsActive = 1
+ORDER BY l.City, rt.TypeName;
+GO
+
+-- View 1
+CREATE VIEW vw_AvailableResourcesByLocation AS
+SELECT 
+    l.LocationName, l.City, rt.TypeName AS ResourceType, r.ResourceName, r.Condition,
+    COALESCE(h.HospitalName, o.OrganizationName) AS Owner, l.LocationID, r.ResourceID
+FROM Resources r
+INNER JOIN ResourceTypes rt ON r.ResourceTypeID = rt.ResourceTypeID
+INNER JOIN Locations l ON r.LocationID = l.LocationID
+LEFT JOIN Hospitals h ON r.HospitalID = h.HospitalID
+LEFT JOIN Organizations o ON r.OrganizationID = o.OrganizationID
+WHERE r.Status = 'Available' AND r.IsActive = 1;
+GO
+
+-- Query 2: Resource Utilization Report
+-- Shows usage statistics by resource type to identify which resources need more inventory
+SELECT 
+    rt.TypeName AS ResourceType,
+    rt.Category,
+    COUNT(DISTINCT r.ResourceID) AS TotalResources,
+    COUNT(DISTINCT CASE WHEN res.Status = 'Active' THEN res.ReservationID END) AS CurrentlyInUse,
+    COUNT(DISTINCT res.ReservationID) AS TotalReservations,
+    CAST(COUNT(DISTINCT res.ReservationID) AS FLOAT) / NULLIF(COUNT(DISTINCT r.ResourceID), 0) AS AvgReservationsPerResource
+FROM ResourceTypes rt
+INNER JOIN Resources r ON rt.ResourceTypeID = r.ResourceTypeID
+LEFT JOIN Reservations res ON r.ResourceID = res.ResourceID
+WHERE r.IsActive = 1
+GROUP BY rt.TypeName, rt.Category
+HAVING COUNT(DISTINCT r.ResourceID) > 0
+ORDER BY TotalReservations DESC;
+GO
+
+-- View 2
+CREATE VIEW vw_ResourceUtilization AS
+SELECT 
+    rt.TypeName AS ResourceType, rt.Category,
+    COUNT(DISTINCT r.ResourceID) AS TotalResources,
+    COUNT(DISTINCT CASE WHEN res.Status = 'Active' THEN res.ReservationID END) AS CurrentlyInUse,
+    COUNT(DISTINCT res.ReservationID) AS TotalReservations,
+    CAST(COUNT(DISTINCT res.ReservationID) AS FLOAT) / NULLIF(COUNT(DISTINCT r.ResourceID), 0) AS AvgReservationsPerResource
+FROM ResourceTypes rt
+INNER JOIN Resources r ON rt.ResourceTypeID = r.ResourceTypeID
+LEFT JOIN Reservations res ON r.ResourceID = res.ResourceID
+WHERE r.IsActive = 1
+GROUP BY rt.TypeName, rt.Category
+HAVING COUNT(DISTINCT r.ResourceID) > 0;
+GO
+
+-- Query 3: Emergency Response Activity Report
+-- Shows reservation patterns by emergency type and priority to help administrators plan better
+SELECT 
+    res.EmergencyType, res.PriorityLevel,
+    COUNT(*) AS TotalReservations,
+    COUNT(CASE WHEN res.Status = 'Completed' THEN 1 END) AS CompletedReservations,
+    COUNT(CASE WHEN res.Status = 'Active' THEN 1 END) AS ActiveReservations,
+    rt.TypeName AS MostUsedResourceType,
+    s.FirstName + ' ' + s.LastName AS Coordinator
+FROM Reservations res
+INNER JOIN Resources r ON res.ResourceID = r.ResourceID
+INNER JOIN ResourceTypes rt ON r.ResourceTypeID = rt.ResourceTypeID
+INNER JOIN Staff s ON res.RequestedBy = s.StaffID
+WHERE res.ReservationDateTime >= DATEADD(MONTH, -1, GETDATE())
+GROUP BY res.EmergencyType, res.PriorityLevel, rt.TypeName, s.FirstName, s.LastName
+HAVING COUNT(*) > 0
+ORDER BY res.PriorityLevel, TotalReservations DESC;
+GO
+
+-- View 3
+CREATE VIEW vw_EmergencyResponseActivity AS
+SELECT 
+    res.EmergencyType, res.PriorityLevel,
+    COUNT(*) AS TotalReservations,
+    COUNT(CASE WHEN res.Status = 'Completed' THEN 1 END) AS CompletedReservations,
+    COUNT(CASE WHEN res.Status = 'Active' THEN 1 END) AS ActiveReservations,
+    rt.TypeName AS ResourceType,
+    s.FirstName + ' ' + s.LastName AS Coordinator, res.ReservationDateTime
+FROM Reservations res
+INNER JOIN Resources r ON res.ResourceID = r.ResourceID
+INNER JOIN ResourceTypes rt ON r.ResourceTypeID = rt.ResourceTypeID
+INNER JOIN Staff s ON res.RequestedBy = s.StaffID
+WHERE res.ReservationDateTime >= DATEADD(MONTH, -1, GETDATE())
+GROUP BY res.EmergencyType, res.PriorityLevel, rt.TypeName, s.FirstName, s.LastName, res.ReservationDateTime;
+GO
+
+-- ============================================================================
+-- TRIGGERS FOR AUDIT TABLE
+-- ============================================================================
+
+-- Trigger 1: After INSERT on ResourceTypes
+CREATE TRIGGER trg_ResourceTypes_Insert ON ResourceTypes
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO ResourceAudit (ResourceTypeID, TypeName, Description, Category, Operation, ModifiedBy, ModifiedDate)
+    SELECT ResourceTypeID, TypeName, Description, Category, 'INSERT', SYSTEM_USER, GETDATE()
+    FROM inserted;
+END;
+GO
+
+-- Trigger 2: After UPDATE on ResourceTypes
+CREATE TRIGGER trg_ResourceTypes_Update ON ResourceTypes
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO ResourceAudit (ResourceTypeID, TypeName, Description, Category, Operation, ModifiedBy, ModifiedDate)
+    SELECT ResourceTypeID, TypeName, Description, Category, 'UPDATE', SYSTEM_USER, GETDATE()
+    FROM inserted;
+END;
+GO
+
+-- Trigger 3: After DELETE on ResourceTypes
+CREATE TRIGGER trg_ResourceTypes_Delete ON ResourceTypes
+AFTER DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO ResourceAudit (ResourceTypeID, TypeName, Description, Category, Operation, ModifiedBy, ModifiedDate)
+    SELECT ResourceTypeID, TypeName, Description, Category, 'DELETE', SYSTEM_USER, GETDATE()
+    FROM deleted;
+END;
+GO
+
+-- Test Triggers
+INSERT INTO ResourceTypes (TypeName, Description, Category, RequiresOperator, IsActive)
+VALUES ('Surgical Bed', 'Post-operative recovery bed', 'Bed', 0, 1);
+
+UPDATE ResourceTypes SET Description = 'Post-operative recovery bed with monitoring'
+WHERE TypeName = 'Surgical Bed';
+
+DELETE FROM ResourceTypes WHERE TypeName = 'Surgical Bed';
+
+SELECT * FROM ResourceAudit ORDER BY ModifiedDate DESC;
+GO
+
+-- ============================================================================
+-- STORED PROCEDURE
+-- ============================================================================
+
+-- Stored Procedure: Create Reservation with Transaction
+-- Prevents double-booking by checking availability and updating resource status atomically
+CREATE PROCEDURE sp_CreateReservation
+    @ResourceID INT,
+    @RequestedByStaffID INT,
+    @PatientName VARCHAR(100) = NULL,
+    @EmergencyType VARCHAR(50),
+    @PriorityLevel INT,
+    @StartDateTime DATETIME,
+    @PickupLocationID INT = NULL,
+    @DropoffLocationID INT = NULL,
+    @Notes VARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRANSACTION;
+    
+    BEGIN TRY
+        DECLARE @CurrentStatus VARCHAR(20);
+        SELECT @CurrentStatus = Status FROM Resources WHERE ResourceID = @ResourceID AND IsActive = 1;
+        
+        IF @CurrentStatus IS NULL
+        BEGIN
+            RAISERROR('Resource does not exist or is inactive.', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        IF @CurrentStatus != 'Available'
+        BEGIN
+            RAISERROR('Resource is not available for reservation.', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        INSERT INTO Reservations (ResourceID, RequestedBy, PatientName, EmergencyType, PriorityLevel,
+            ReservationDateTime, StartDateTime, PickupLocationID, DropoffLocationID, Status, Notes)
+        VALUES (@ResourceID, @RequestedByStaffID, @PatientName, @EmergencyType, @PriorityLevel,
+            GETDATE(), @StartDateTime, @PickupLocationID, @DropoffLocationID, 'Active', @Notes);
+        
+        UPDATE Resources SET Status = 'In Use' WHERE ResourceID = @ResourceID;
+        
+        COMMIT TRANSACTION;
+        SELECT SCOPE_IDENTITY() AS NewReservationID;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(@ErrorMessage, 16, 1);
+    END CATCH
+END;
+GO
+
+-- Test Stored Procedure: Successful Reservation
+EXEC sp_CreateReservation
+    @ResourceID = 13, @RequestedByStaffID = 1, @PatientName = 'Test Patient',
+    @EmergencyType = 'Test Emergency', @PriorityLevel = 2, @StartDateTime = '2025-11-20 10:00:00',
+    @PickupLocationID = 1, @DropoffLocationID = 2, @Notes = 'Test reservation';
+
+SELECT ResourceID, ResourceName, Status FROM Resources WHERE ResourceID = 13;
+
+-- Test Stored Procedure: Double-Booking Prevention (should fail)
+EXEC sp_CreateReservation
+    @ResourceID = 13, @RequestedByStaffID = 2, @PatientName = 'Another Patient',
+    @EmergencyType = 'Another Emergency', @PriorityLevel = 1, @StartDateTime = '2025-11-20 11:00:00',
+    @Notes = 'This should fail';
+GO
+
+-- ============================================================================
+-- USER-DEFINED FUNCTION
+-- ============================================================================
+
+-- Function: Calculate Distance using Haversine Formula
+-- Returns distance in miles between two lat/long coordinates
+CREATE FUNCTION fn_CalculateDistance
+(
+    @Lat1 DECIMAL(9,6), @Lon1 DECIMAL(9,6),
+    @Lat2 DECIMAL(9,6), @Lon2 DECIMAL(9,6)
+)
+RETURNS DECIMAL(10,2)
+AS
+BEGIN
+    DECLARE @Distance DECIMAL(10,2);
+    DECLARE @EarthRadius DECIMAL(10,2) = 3959;
+    
+    IF @Lat1 IS NULL OR @Lon1 IS NULL OR @Lat2 IS NULL OR @Lon2 IS NULL
+        RETURN NULL;
+    
+    DECLARE @dLat DECIMAL(18,10) = RADIANS(@Lat2 - @Lat1);
+    DECLARE @dLon DECIMAL(18,10) = RADIANS(@Lon2 - @Lon1);
+    DECLARE @a DECIMAL(18,10) = SIN(@dLat / 2) * SIN(@dLat / 2) +
+        COS(RADIANS(@Lat1)) * COS(RADIANS(@Lat2)) * SIN(@dLon / 2) * SIN(@dLon / 2);
+    DECLARE @c DECIMAL(18,10) = 2 * ATN2(SQRT(@a), SQRT(1 - @a));
+    
+    SET @Distance = @EarthRadius * @c;
+    RETURN @Distance;
+END;
+GO
+
+-- Test Function: Calculate distances between locations
+SELECT 
+    l1.LocationName AS FromLocation, l2.LocationName AS ToLocation,
+    l1.City AS FromCity, l2.City AS ToCity,
+    dbo.fn_CalculateDistance(l1.Latitude, l1.Longitude, l2.Latitude, l2.Longitude) AS DistanceMiles
+FROM Locations l1
+CROSS JOIN Locations l2
+WHERE l1.LocationID < l2.LocationID AND l1.Latitude IS NOT NULL AND l2.Latitude IS NOT NULL
+ORDER BY DistanceMiles;
+
+-- Test Function: Find nearest ambulances to Downtown Phoenix
+DECLARE @EmergencyLat DECIMAL(9,6) = 33.448376;
+DECLARE @EmergencyLon DECIMAL(9,6) = -112.074036;
+
+SELECT TOP 5
+    r.ResourceName, l.LocationName, l.City,
+    dbo.fn_CalculateDistance(@EmergencyLat, @EmergencyLon, l.Latitude, l.Longitude) AS DistanceMiles,
+    r.Condition, COALESCE(h.HospitalName, o.OrganizationName) AS Owner
+FROM Resources r
+INNER JOIN ResourceTypes rt ON r.ResourceTypeID = rt.ResourceTypeID
+INNER JOIN Locations l ON r.LocationID = l.LocationID
+LEFT JOIN Hospitals h ON r.HospitalID = h.HospitalID
+LEFT JOIN Organizations o ON r.OrganizationID = o.OrganizationID
+WHERE rt.TypeName = 'Ambulance' AND r.Status = 'Available' AND l.Latitude IS NOT NULL
+ORDER BY DistanceMiles;
+GO
+
+-- ============================================================================
+-- CURSOR
+-- ============================================================================
+
+-- Cursor: Auto-complete reservations active for more than 24 hours
+-- Prevents resources from being stuck in 'In Use' status
+
+SELECT ReservationID, ResourceID, PatientName, StartDateTime,
+    DATEDIFF(HOUR, StartDateTime, GETDATE()) AS HoursActive, Status
+FROM Reservations
+WHERE Status = 'Active' AND EndDateTime IS NULL
+    AND DATEDIFF(HOUR, StartDateTime, GETDATE()) > 24
+ORDER BY StartDateTime;
+GO
+
+DECLARE @ReservationID INT, @ResourceID INT, @PatientName VARCHAR(100);
+DECLARE @StartDateTime DATETIME, @CompletedCount INT = 0;
+
+DECLARE reservation_cursor CURSOR FOR
+SELECT ReservationID, ResourceID, PatientName, StartDateTime
+FROM Reservations
+WHERE Status = 'Active' AND EndDateTime IS NULL
+    AND DATEDIFF(HOUR, StartDateTime, GETDATE()) > 24;
+
+OPEN reservation_cursor;
+FETCH NEXT FROM reservation_cursor INTO @ReservationID, @ResourceID, @PatientName, @StartDateTime;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    UPDATE Reservations
+    SET Status = 'Completed',
+        EndDateTime = DATEADD(HOUR, 24, StartDateTime),
+        Notes = ISNULL(Notes + ' | ', '') + 'Auto-completed by system after 24 hours'
+    WHERE ReservationID = @ReservationID;
+    
+    UPDATE Resources SET Status = 'Available' WHERE ResourceID = @ResourceID;
+    
+    SET @CompletedCount = @CompletedCount + 1;
+    FETCH NEXT FROM reservation_cursor INTO @ReservationID, @ResourceID, @PatientName, @StartDateTime;
+END;
+
+CLOSE reservation_cursor;
+DEALLOCATE reservation_cursor;
+
+PRINT 'Total reservations auto-completed: ' + CAST(@CompletedCount AS VARCHAR);
+
+SELECT ReservationID, ResourceID, PatientName, StartDateTime, EndDateTime, Status, Notes
+FROM Reservations
+WHERE Notes LIKE '%Auto-completed by system%'
+ORDER BY StartDateTime;
+GO
+
+-- ============================================================================
+-- VERIFICATION
+-- ============================================================================
+
+SELECT 'Hospitals' AS TableName, COUNT(*) AS RecordCount FROM Hospitals
+UNION ALL SELECT 'Organizations' AS TableName, COUNT(*) FROM Organizations
+UNION ALL SELECT 'ResourceTypes' AS TableName, COUNT(*) FROM ResourceTypes
+UNION ALL SELECT 'Locations' AS TableName, COUNT(*) FROM Locations
+UNION ALL SELECT 'Staff' AS TableName, COUNT(*) FROM Staff
+UNION ALL SELECT 'Resources' AS TableName, COUNT(*) FROM Resources
+UNION ALL SELECT 'Reservations' AS TableName, COUNT(*) FROM Reservations
+UNION ALL SELECT 'ResourceAudit' AS TableName, COUNT(*) FROM ResourceAudit;
+GO
