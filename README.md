@@ -70,6 +70,14 @@ The Entity Relationship Diagram (ERD) is included in the `reports/` directory.
 
 - Cursor Implementation
 
+---
+
+## Contributors
+
+- Mansi Nandkar
+- Suraj Ravindra Rao
+
+
 - Documentation Standards
 
 
